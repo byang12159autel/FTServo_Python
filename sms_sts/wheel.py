@@ -31,14 +31,14 @@ else:
     print("Failed to open the port")
     quit()
 
-# Set port baudrate 1000000
-if portHandler.setBaudRate(1000000):
+# Set port baudrate 115200
+if portHandler.setBaudRate(115200):
     print("Succeeded to change the baudrate")
 else:
     print("Failed to change the baudrate")
     quit()
 
-scs_comm_result, scs_error = packetHandler.WheelMode(1)
+scs_comm_result, scs_error = packetHandler.WheelMode(2)
 if scs_comm_result != COMM_SUCCESS:
     print("%s" % packetHandler.getTxRxResult(scs_comm_result))
 elif scs_error != 0:
@@ -46,7 +46,7 @@ elif scs_error != 0:
 
 while 1:
     # Servo (ID1) accelerates to a maximum speed of V=60 * 0.732=43.92rpm at an acceleration of A=50 * 8.7deg/s ^ 2, forward rotation
-    scs_comm_result, scs_error = packetHandler.WriteSpec(1, 60, 50)
+    scs_comm_result, scs_error = packetHandler.WriteSpec(2, 60, 50)
     if scs_comm_result != COMM_SUCCESS:
         print("%s" % packetHandler.getTxRxResult(scs_comm_result))
     if scs_error != 0:
@@ -55,7 +55,7 @@ while 1:
     time.sleep(5);
 
     # Servo (ID1) decelerates to speed 0 and stops rotating at an acceleration of A=50 * 8.7deg/s ^ 2
-    scs_comm_result, scs_error = packetHandler.WriteSpec(1, 0, 50)
+    scs_comm_result, scs_error = packetHandler.WriteSpec(2, 0, 50)
     if scs_comm_result != COMM_SUCCESS:
         print("%s" % packetHandler.getTxRxResult(scs_comm_result))
     if scs_error != 0:
@@ -63,8 +63,8 @@ while 1:
 
     time.sleep(2);
 
-     # Servo (ID1/ID2) accelerates to a maximum speed of V=-60 * 0.732=-43.92rpm with an acceleration of A=50 * 8.7deg/s ^ 2, reverse rotation
-    scs_comm_result, scs_error = packetHandler.WriteSpec(1, -50, 50)
+     # Reverse rotation: accelerates to V=-50 * 0.732 rpm with A=50 * 8.7deg/s^2
+    scs_comm_result, scs_error = packetHandler.WriteSpec(2, -50, 50)
     if scs_comm_result != COMM_SUCCESS:
         print("%s" % packetHandler.getTxRxResult(scs_comm_result))
     if scs_error != 0:
@@ -73,7 +73,7 @@ while 1:
     time.sleep(5);
 
     # Servo (ID1) decelerates to speed 0 and stops rotating at an acceleration of A=50 * 8.7deg/s ^ 2
-    scs_comm_result, scs_error = packetHandler.WriteSpec(1, 0, 50)
+    scs_comm_result, scs_error = packetHandler.WriteSpec(2, 0, 50)
     if scs_comm_result != COMM_SUCCESS:
         print("%s" % packetHandler.getTxRxResult(scs_comm_result))
     if scs_error != 0:

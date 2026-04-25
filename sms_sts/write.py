@@ -31,8 +31,8 @@ else:
     print("Failed to open the port")
     quit()
 
-# Set port baudrate 1000000
-if portHandler.setBaudRate(1000000):
+# Set port baudrate 115200
+if portHandler.setBaudRate(115200):
     print("Succeeded to change the baudrate")
 else:
     print("Failed to change the baudrate")
@@ -40,7 +40,7 @@ else:
 
 while 1:
     # Servo (ID1) runs at a maximum speed of V=60 * 0.732=43.92rpm and an acceleration of A=50 * 8.7deg/s ^ 2 until it reaches position P1=4095
-    scs_comm_result, scs_error = packetHandler.WritePosEx(1, 4095, 60, 50)
+    scs_comm_result, scs_error = packetHandler.WritePosEx(2, 4095, 60, 50)
     if scs_comm_result != COMM_SUCCESS:
         print("%s" % packetHandler.getTxRxResult(scs_comm_result))
     elif scs_error != 0:
@@ -49,7 +49,7 @@ while 1:
     time.sleep(((4095-0)/(60*50) + (60*50)/(50*100) + 0.05))#[(P1-P0)/(V*50)] + [(V*50)/(A*100)] + 0.05
     
     # Servo (ID1) runs at a maximum speed of V=60 * 0.732=43.92rpm and an acceleration of A=50 * 8.7deg/s ^ 2 until P0=0 position
-    scs_comm_result, scs_error = packetHandler.WritePosEx(1, 0, 60, 50)
+    scs_comm_result, scs_error = packetHandler.WritePosEx(2, 0, 60, 50)
     if scs_comm_result != COMM_SUCCESS:
         print("%s" % packetHandler.getTxRxResult(scs_comm_result))
     elif scs_error != 0:

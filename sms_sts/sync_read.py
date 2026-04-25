@@ -31,8 +31,8 @@ else:
     quit()
 
 
-# Set port baudrate 1000000
-if portHandler.setBaudRate(1000000):
+# Set port baudrate 115200
+if portHandler.setBaudRate(115200):
     print("Succeeded to change the baudrate")
 else:
     print("Failed to change the baudrate")
@@ -41,8 +41,8 @@ else:
 groupSyncRead = GroupSyncRead(packetHandler, SMS_STS_PRESENT_POSITION_L, 4)
 
 while 1:
-    for scs_id in range(1, 11):
-        # Add parameter storage for SCServo#1~10 present position value
+    for scs_id in [2]:
+        # Add parameter storage for present position value
         scs_addparam_result = groupSyncRead.addParam(scs_id)
         if scs_addparam_result != True:
             print("[ID:%03d] groupSyncRead addparam failed" % scs_id)
@@ -51,8 +51,8 @@ while 1:
     if scs_comm_result != COMM_SUCCESS:
         print("%s" % packetHandler.getTxRxResult(scs_comm_result))
 
-    for scs_id in range(1, 11):
-        # Check if groupsyncread data of SCServo#1~10 is available
+    for scs_id in [2]:
+        # Check if groupsyncread data is available
         scs_data_result, scs_error = groupSyncRead.isAvailable(scs_id, SMS_STS_PRESENT_POSITION_L, 4)
         if scs_data_result == True:
             # Get SCServo#scs_id present position value

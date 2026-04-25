@@ -30,7 +30,7 @@ else:
     quit()
 
 # Set port baudrate 1000000
-if portHandler.setBaudRate(1000000):
+if portHandler.setBaudRate(115200):
     print("Succeeded to change the baudrate")
 else:
     print("Failed to change the baudrate")
@@ -38,11 +38,11 @@ else:
 
 # Try to ping the ID:1 FTServo
 # Get SCServo model number
-scs_model_number, scs_comm_result, scs_error = packetHandler.ping(1)
+scs_model_number, scs_comm_result, scs_error = packetHandler.ping(2)
 if scs_comm_result != COMM_SUCCESS:
     print("%s" % packetHandler.getTxRxResult(scs_comm_result))
 else:
-    print("[ID:%03d] ping Succeeded. SCServo model number : %d" % (1, scs_model_number))
+    print("[ID:%03d] ping Succeeded. SCServo model number : %d" % (2, scs_model_number))
 if scs_error != 0:
     print("%s" % packetHandler.getRxPacketError(scs_error))
 
