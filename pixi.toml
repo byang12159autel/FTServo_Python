@@ -1,0 +1,11 @@
+[project]
+name = "ftservo-python"
+version = "0.1.0"
+description = "Feetech SMS/STS/SCSCL/HLS servo SDK and examples"
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "osx-64", "linux-64"]
+
+[dependencies]
+python = ">=3.9"
+pyserial = "*"
+tyro = "*"
