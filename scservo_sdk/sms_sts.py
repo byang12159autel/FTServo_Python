@@ -67,6 +67,11 @@ class sms_sts(protocol_packet_handler):
         txpacket = [acc, self.scs_lobyte(position), self.scs_hibyte(position), 0, 0, self.scs_lobyte(speed), self.scs_hibyte(speed)]
         return self.writeTxRx(scs_id, SMS_STS_ACC, len(txpacket), txpacket)
 
+    def WritePosExTxOnly(self, scs_id, position, speed, acc):
+        position = self.scs_toscs(position, 15)
+        txpacket = [acc, self.scs_lobyte(position), self.scs_hibyte(position), 0, 0, self.scs_lobyte(speed), self.scs_hibyte(speed)]
+        return self.writeTxOnly(scs_id, SMS_STS_ACC, len(txpacket), txpacket)
+
     def ReadPos(self, scs_id):
         scs_present_position, scs_comm_result, scs_error = self.read2ByteTxRx(scs_id, SMS_STS_PRESENT_POSITION_L)
         return self.scs_tohost(scs_present_position, 15), scs_comm_result, scs_error
