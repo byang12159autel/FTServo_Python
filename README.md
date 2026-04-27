@@ -20,20 +20,29 @@ The 'scsservo_sdk' directory contains the original archive with the source code 
 Tested on Linux Raspbian GNU/Linux 9.13 (stretch).
 Python version Python 3.5.3
 
-### Method 1. Clone repositry
+### Quickstart
 
 ```bash
-$ cd /usr/src/
 $ sudo git clone https://github.com/ftservo/FTServo_Python.git
 $ sudo chown -R pi FTServo_Python
 $ cd FTServo_Python
 $ pixi install            # creates the .pixi environment
 
+# Quick Tests: 
 # Basic Ping Test
-$ python3 sms_sts/ping.py
+$ pixi run python3 sms_sts/ping.py
+# Calibrate Max/Min range travel
+$ pixi run python3 sms_sts/calibrate_range.py --servo-id 2 --baudrate 115200
 # Keyboard Position Control
 $ pixi run python3 sms_sts/keyboard_stream.py --servo-id 2 --baudrate 115200
 ```
+
+### Full Gripper Setup
+
+- Increase Baudrate 115200 -> 1000000. The WritePosEx packet is 14 bytes. 1 Mbps drops every byte's wire time ~9×. 
+     ```bash
+     pixi run python3 sms_sts/set_baud.py
+     ```
 
 ## SMS/STS Control Modes
 
@@ -62,7 +71,35 @@ Direct PWM/open-loop drive. The "speed" field is interpreted as a signed PWM dut
 
 To return to position mode from any other mode, write `0` to register 33.
 
-### Method 2. Install pip package
+## Debug Notes
+
+### Servo stops moving but still responds — power cycle fixes it
+
+Most likely cause: an **overload/error latch with auto-torque-off**. SMS/STS firmware monitors load, current, voltage, and temperature; when a threshold is exceeded long enough it latches a fault bit and, on most units, drops `TORQUE_ENABLE` to 0 automatically. After that:
+
+- The servo keeps responding to packets (so it isn't "dead" on the bus).
+- It accepts your `WritePosEx` writes — register updates fine.
+- But it doesn't move, because torque is off and the error is latched.
+- Some firmwares refuse to re-enable torque until the fault is cleared.
+
+A power cycle clears the volatile error latch and brings torque back. `keyboard_stream.py` re-enables torque at startup (line 114).
+
+Why this is the prime suspect for the gripper script:
+- The contact-freeze logic triggers on `PRESENT_LOAD > 400`. If the gripper hits a stop or freeze reacts late, the servo can briefly push hard enough to latch overload before the freeze pins it.
+- If `WritePosEx` is replaced with `writeTxOnly` (or even with `TxRx` when the error byte isn't checked), a latched fault is invisible from the host.
+
+**Other plausible causes:**
+1. **UART parser desync** — if the script is killed mid-packet, the servo's RX state machine can be waiting on bytes that never come. Power cycle resets the parser.
+2. **EEPROM stuck unlocked** — if code unlocked EEPROM and crashed before relocking. Doesn't usually stop motion, but worth a relock.
+3. **Host-side serial buffer wedged** — FTDI/CH340 driver state. Power-cycling the *adapter* (not the servo) helps here; servo power cycle alone won't.
+
+**What to do:**
+- Keep `WritePosEx` (the `TxRx` version) and check the returned `err`. The SDK has `getRxPacketError(err)` for human-readable output.
+- Periodically read `SMS_STS_PRESENT_TEMPERATURE` (reg 63) and `SMS_STS_PRESENT_CURRENT_L` (reg 69) to spot drift before it latches.
+- If torque was auto-disabled, re-write `SMS_STS_TORQUE_ENABLE = 1` to clear soft state on most units before reaching for the power switch.
+- Lower `--force-threshold` or raise `--rate-hz` so contact freeze engages before overload.
+
+### Other Installation Option: Install pip package
 
 Copy the sample file to any location convenient for you. In the example I use '/home/pi/FeetechTestFiles'
 
