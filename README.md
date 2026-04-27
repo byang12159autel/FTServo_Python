@@ -46,7 +46,7 @@ pixi run python3 sms_sts/set_baud.py
 pixi run python3 sms_sts/keyboard_stream.py --servo-id 2 --baudrate 1000000 --rate-hz 200 --acc 200 
 ```
 
-Internally the position control runs a trapezoidal velocity profile for each new goal. Tune --acc and --speed for the trapezoid. 
+Internally the position control runs a trapezoidal velocity profile for each new goal. Tune default --acc 50 and --speed 60 for the trapezoid. 
 
 
 
