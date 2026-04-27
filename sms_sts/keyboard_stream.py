@@ -27,6 +27,7 @@
 #   python3 keyboard_stream.py --servo-id 2 --baudrate 115200
 #
 
+import csv
 import os
 import sys
 import time
@@ -34,6 +35,7 @@ import select
 import termios
 import tty
 from dataclasses import dataclass
+from typing import Optional
 
 import tyro
 
@@ -61,6 +63,8 @@ class Args:
     """Magnitude threshold on PRESENT_LOAD that triggers contact freeze. PRESENT_LOAD is roughly 0..1000 (PWM duty x10). Tune empirically."""
     force_hysteresis: int = 50
     """Once frozen, exit freeze when |target - contact_pos| exceeds this many ticks."""
+    log: Optional[str] = None
+    """If set, write a CSV log (t,target,commanded,present_pos,present_load,in_contact) for plot_stream.py."""
 
 
 def poll_key():
@@ -136,6 +140,16 @@ def main(args: Args) -> None:
     print("Force: threshold=%d  hysteresis=%d ticks" % (args.force_threshold, args.force_hysteresis))
     print("Keys: a/d jog | s hold | 0 MIN | 9 MAX | -/+ step | q quit")
 
+    log_file = None
+    log_writer = None
+    if args.log:
+        log_file = open(args.log, "w", newline="")
+        log_writer = csv.writer(log_file)
+        log_writer.writerow(["t", "target", "commanded", "present_pos", "present_load", "in_contact"])
+        print("Logging to %s" % args.log)
+
+    t_start = time.monotonic()
+
     fd = sys.stdin.fileno()
     old_attrs = termios.tcgetattr(fd)
     try:
@@ -165,14 +179,20 @@ def main(args: Args) -> None:
                 elif key == '+' or key == '=':
                     step = min(max_tick - min_tick, max(1, step * 2))
 
-            load_raw, c, e = packetHandler.read2ByteTxRx(args.servo_id, SMS_STS_PRESENT_LOAD_L)
-            load_mag = (load_raw & 0x3FF) if (c == COMM_SUCCESS and e == 0) else 0
+            data, c, e = packetHandler.readTxRx(args.servo_id, SMS_STS_PRESENT_POSITION_L, 6)
+            read_ok = (c == COMM_SUCCESS and e == 0 and len(data) == 6)
+            if read_ok:
+                pos_word = packetHandler.scs_makeword(data[0], data[1])
+                present_pos = packetHandler.scs_tohost(pos_word, 15)
+                load_word = packetHandler.scs_makeword(data[4], data[5])
+                load_mag = load_word & 0x3FF
+            else:
+                present_pos = float('nan')
+                load_mag = 0
 
-            if not in_contact and load_mag > args.force_threshold:
-                cur, c, e = packetHandler.ReadPos(args.servo_id)
-                if c == COMM_SUCCESS and e == 0:
-                    freeze_pos = cur
-                    in_contact = True
+            if not in_contact and load_mag > args.force_threshold and read_ok:
+                freeze_pos = present_pos
+                in_contact = True
 
             if in_contact and abs(target - freeze_pos) > args.force_hysteresis:
                 in_contact = False
@@ -181,6 +201,16 @@ def main(args: Args) -> None:
             packetHandler.SyncWritePosEx(args.servo_id, commanded, args.speed, args.acc)
             packetHandler.groupSyncWrite.txPacket()
             packetHandler.groupSyncWrite.clearParam()
+
+            if log_writer is not None:
+                log_writer.writerow([
+                    "%.4f" % (t0 - t_start),
+                    target,
+                    commanded,
+                    present_pos if read_ok else "nan",
+                    load_mag if read_ok else "nan",
+                    1 if in_contact else 0,
+                ])
 
             tag = "[CONTACT]" if in_contact else "         "
             sys.stdout.write("\rtarget=%4d  cmd=%4d  load=%4d  step=%4d  %s " % (target, commanded, load_mag, step, tag))
@@ -193,6 +223,8 @@ def main(args: Args) -> None:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
         sys.stdout.write("\n")
         sys.stdout.flush()
+        if log_file is not None:
+            log_file.close()
         packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_TORQUE_ENABLE, 0)
         print("Torque disabled. Closing port.")
         portHandler.closePort()

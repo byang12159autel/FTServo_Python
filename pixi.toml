@@ -9,3 +9,5 @@ platforms = ["osx-arm64", "osx-64", "linux-64"]
 python = ">=3.9"
 pyserial = "*"
 tyro = "*"
+matplotlib = "*"
+numpy = "*"
