@@ -39,10 +39,16 @@ $ pixi run python3 sms_sts/keyboard_stream.py --servo-id 2 --baudrate 115200
 
 ### Full Gripper Setup
 
-- Increase Baudrate 115200 -> 1000000. The WritePosEx packet is 14 bytes. 1 Mbps drops every byte's wire time ~9×. 
-     ```bash
-     pixi run python3 sms_sts/set_baud.py
-     ```
+Increase Baudrate 115200 -> 1000000. The WritePosEx packet is 14 bytes. 1 Mbps drops every byte's wire time ~9×. 
+```bash
+pixi run python3 sms_sts/set_baud.py
+
+pixi run python3 sms_sts/keyboard_stream.py --servo-id 2 --baudrate 1000000 --rate-hz 200 --acc 200 
+```
+
+Internally the position control runs a trapezoidal velocity profile for each new goal. Tune --acc and --speed for the trapezoid. 
+
+
 
 ## SMS/STS Control Modes
 
@@ -51,7 +57,16 @@ The SMS/STS servos support four control modes, selected by writing a value to re
 ### Mode 0 — Position (Servo) Mode (default)
 Closed-loop position control over the 0–4095 tick range (one full revolution).
 - API: `WritePosEx(id, position, speed, acc)`, `RegWritePosEx(...)` + `RegAction()`, `SyncWritePosEx(...)`
-- The servo accelerates at `acc * 8.7 deg/s²` to a max speed of `speed * 0.732 rpm`, then stops at the target tick.
+- Internally runs a **trapezoidal velocity profile** for each new goal:
+  1. Accelerate at `acc * 8.7 deg/s²` from 0
+  2. Cruise at `speed * 0.732 rpm`
+  3. Decelerate at `acc` back to 0, landing on the goal tick
+- Edge cases:
+  - **Triangular profile**: if the move is too short to reach cruise speed, the servo decelerates before the flat-top — automatic, no flat-top segment.
+  - **`acc=0`**: bypasses the ramp entirely. The servo applies max internal effort to drive position error to zero — closer to a "snap" than a trapezoid. Snappier for small jogs, but can shock heavy loads.
+  - **`speed=0`**: no speed cap; the servo uses its internal max.
+  - **`GOAL_TIME` register (44–45)**: alternative timed-move mode some firmwares support (specify duration instead of speed). `WritePosEx` writes 0 here, so this SDK is always in speed mode.
+- Mental model: `acc` shapes the *corners*, `speed` shapes the *middle*.
 - Examples: `sms_sts/write.py`, `sms_sts/reg_write.py`, `sms_sts/read_write.py`, `sms_sts/sync_write.py`
 
 ### Mode 1 — Wheel (Constant-Speed) Mode
