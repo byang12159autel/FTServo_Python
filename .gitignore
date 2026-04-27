@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 .vscode/
 .idea/
+
+# Stream log artifacts in repo root
+/*.csv
+/*.png
