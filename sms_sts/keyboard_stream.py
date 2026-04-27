@@ -27,6 +27,7 @@
 #   python3 keyboard_stream.py --servo-id 2 --baudrate 115200
 #
 
+import os
 import sys
 import time
 import select
@@ -36,7 +37,7 @@ from dataclasses import dataclass
 
 import tyro
 
-sys.path.append("..")
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from scservo_sdk import *                      # Uses FTServo SDK library
 
 
@@ -101,19 +102,30 @@ def main(args: Args) -> None:
         portHandler.closePort()
         return
 
-    comm, err = packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_TORQUE_ENABLE, 1)
+    # Force position mode (0). EEPROM writes require unlock; relock after.
+    packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_LOCK, 0)
+    comm, err = packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_MODE, 0)
+    packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_LOCK, 1)
     if comm != COMM_SUCCESS or err != 0:
-        print("Failed to enable torque.")
+        print("Failed to set servo to position mode.")
         portHandler.closePort()
         return
 
+    # Read current position and seed GOAL with it BEFORE enabling torque, so the
+    # motor doesn't snap to a stale goal from a previous run.
     pos, comm, err = packetHandler.ReadPos(args.servo_id)
     if comm != COMM_SUCCESS or err != 0:
         print("Failed to read present position.")
         portHandler.closePort()
         return
-
     target = max(min_tick, min(max_tick, pos))
+    packetHandler.WritePosEx(args.servo_id, target, args.speed, args.acc)
+
+    comm, err = packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_TORQUE_ENABLE, 1)
+    if comm != COMM_SUCCESS or err != 0:
+        print("Failed to enable torque.")
+        portHandler.closePort()
+        return
     step = args.step
     period = 1.0 / args.rate_hz
 
@@ -179,7 +191,8 @@ def main(args: Args) -> None:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
         sys.stdout.write("\n")
         sys.stdout.flush()
-        print("Closing port.")
+        packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_TORQUE_ENABLE, 0)
+        print("Torque disabled. Closing port.")
         portHandler.closePort()
 
 

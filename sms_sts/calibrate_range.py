@@ -13,13 +13,17 @@
 #   python3 calibrate_range.py --servo-id 2 --baudrate 115200
 #
 
+import os
+import select
 import sys
+import termios
 import time
+import tty
 from dataclasses import dataclass
 
 import tyro
 
-sys.path.append("..")
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from scservo_sdk import *                      # Uses FTServo SDK library
 
 
@@ -46,12 +50,30 @@ def check(comm_result, error, packetHandler, where):
 
 
 def capture(packetHandler, scs_id, label):
-    input("Move the gripper to the fully-%s position by hand, then press Enter..." % label)
-    pos, comm, err = packetHandler.ReadPos(scs_id)
-    if not check(comm, err, packetHandler, "read %s" % label):
+    print("Move the gripper to the fully-%s position by hand, then press Enter..." % label)
+    fd = sys.stdin.fileno()
+    old_attrs = termios.tcgetattr(fd)
+    last_pos = None
+    try:
+        tty.setcbreak(fd)
+        while True:
+            pos, comm, err = packetHandler.ReadPos(scs_id)
+            if check(comm, err, packetHandler, "read %s" % label):
+                last_pos = pos
+                sys.stdout.write("\r  live %s pos = %4d   " % (label, pos))
+                sys.stdout.flush()
+            if select.select([sys.stdin], [], [], 0.05)[0]:
+                ch = sys.stdin.read(1)
+                if ch in ("\r", "\n"):
+                    break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_attrs)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+    if last_pos is None:
         return None
-    print("  recorded %s_TICK = %d" % (label, pos))
-    return pos
+    print("  recorded %s_TICK = %d" % (label, last_pos))
+    return last_pos
 
 
 def main(args: Args) -> None:
@@ -77,6 +99,15 @@ def main(args: Args) -> None:
         portHandler.closePort()
         return
 
+    # Zero any existing OFS so captured positions are raw encoder ticks. We may
+    # write a new OFS later if the gripper's range crosses the encoder wrap.
+    packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_LOCK, 0)
+    comm, err = packetHandler.write2ByteTxRx(args.servo_id, SMS_STS_OFS_L, 0)
+    packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_LOCK, 1)
+    if not check(comm, err, packetHandler, "zero OFS"):
+        portHandler.closePort()
+        return
+
     open_tick = capture(packetHandler, args.servo_id, "OPEN")
     if open_tick is None:
         portHandler.closePort()
@@ -94,9 +125,10 @@ def main(args: Args) -> None:
     min_tick = min(open_tick, closed_tick)
     max_tick = max(open_tick, closed_tick)
 
-    if min_tick < 50 or max_tick > 4045:
-        print("WARNING: a recorded tick is near 0 or 4095. The gripper may have")
-        print("crossed the single-turn wraparound boundary; calibration may be wrong.")
+    if abs(closed_tick - open_tick) > 2048:
+        print("WARNING: open/closed differ by >2048 ticks; the gripper likely crosses")
+        print("the encoder wraparound (raw=0). Position-mode commands near MIN/MAX")
+        print("may overshoot through 0 and stall. Consider rotating the servo horn.")
 
     print("")
     print("Will write to EPROM:")
@@ -107,6 +139,12 @@ def main(args: Args) -> None:
         print("Aborted.")
         portHandler.closePort()
         return
+
+    mode_before, comm, err = packetHandler.read1ByteTxRx(args.servo_id, SMS_STS_MODE)
+    if not check(comm, err, packetHandler, "read MODE pre"):
+        portHandler.closePort()
+        return
+    print("Initial MODE register = %d (0=position, 1=wheel/CR, 2=PWM, 3=step)" % mode_before)
 
     comm, err = packetHandler.unLockEprom(args.servo_id)
     if not check(comm, err, packetHandler, "unlock EPROM"):
@@ -120,6 +158,12 @@ def main(args: Args) -> None:
 
     comm, err = packetHandler.write2ByteTxRx(args.servo_id, SMS_STS_MAX_ANGLE_LIMIT_L, max_tick)
     if not check(comm, err, packetHandler, "write MAX_ANGLE"):
+        portHandler.closePort()
+        return
+
+    # Force position mode (0) so subsequent WritePosEx commands track to a target.
+    comm, err = packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_MODE, 0)
+    if not check(comm, err, packetHandler, "write MODE"):
         portHandler.closePort()
         return
 
@@ -137,22 +181,56 @@ def main(args: Args) -> None:
         portHandler.closePort()
         return
 
-    print("Verified: MIN=%d, MAX=%d" % (min_back, max_back))
-    if min_back != min_tick or max_back != max_tick:
-        print("MISMATCH between written and read-back values.")
+    mode_back, comm, err = packetHandler.read1ByteTxRx(args.servo_id, SMS_STS_MODE)
+    if not check(comm, err, packetHandler, "read MODE post"):
         portHandler.closePort()
         return
+
+    print("Verified: MIN=%d, MAX=%d, MODE=%d" % (min_back, max_back, mode_back))
+    if min_back != min_tick or max_back != max_tick:
+        print("MISMATCH between written and read-back angle limits.")
+        portHandler.closePort()
+        return
+    if mode_back != 0:
+        print("MODE register did not stick at 0 (got %d). Aborting before sweep — the" % mode_back)
+        print("motor would spin in wheel/step mode instead of tracking position.")
+        portHandler.closePort()
+        return
+
+    # Seed GOAL with current position BEFORE enabling torque, so the motor
+    # doesn't snap to a stale goal left in SRAM from a previous run.
+    pos, comm, err = packetHandler.ReadPos(args.servo_id)
+    if not check(comm, err, packetHandler, "read pos pre-torque"):
+        portHandler.closePort()
+        return
+    seed = max(min_tick, min(max_tick, pos))
+    packetHandler.WritePosEx(args.servo_id, seed, 50, 20)
 
     comm, err = packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_TORQUE_ENABLE, 1)
     if not check(comm, err, packetHandler, "enable torque"):
         portHandler.closePort()
         return
 
+    near_wrap = abs(closed_tick - open_tick) > 2048 or min_tick < 100 or max_tick > 3995
+    # if near_wrap:
+    #     print("Skipping sweep: gripper extents are within 100 ticks of the encoder")
+    #     print("wrap (raw=0 or 4095). Position-mode overshoot near MIN/MAX would")
+    #     print("cross 0 and stall the motor. Rotate the servo horn so both extents")
+    #     print("are well clear of raw=0/4095, then re-run calibration.")
+    # else:
     print("Sweeping to MIN, then MAX for visual confirmation...")
-    packetHandler.WritePosEx(args.servo_id, min_tick, 200, 50)
-    time.sleep(2.0)
-    packetHandler.WritePosEx(args.servo_id, max_tick, 200, 50)
-    time.sleep(2.0)
+    for label, target in (("MIN", min_tick), ("MAX", max_tick)):
+        packetHandler.WritePosEx(args.servo_id, target, 50, 20)
+        t_end = time.monotonic() + 3.0
+        next_tick = time.monotonic()
+        while time.monotonic() < t_end:
+            pos, comm, err = packetHandler.ReadPos(args.servo_id)
+            if comm == COMM_SUCCESS and err == 0:
+                print("  -> %s target=%4d  pos=%4d" % (label, target, pos))
+            next_tick += 0.1
+            sleep_for = next_tick - time.monotonic()
+            if sleep_for > 0:
+                time.sleep(sleep_for)
 
     print("")
     print("Done. OPEN_TICK=%d  CLOSED_TICK=%d" % (open_tick, closed_tick))
