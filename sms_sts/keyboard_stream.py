@@ -144,11 +144,6 @@ def main(args: Args) -> None:
         while running:
             t0 = time.monotonic()
 
-            # Drain the servo's status packet from the previous tick's
-            # WritePosExTxOnly — the servo always ACKs writes, we just don't
-            # read them, so the bytes accumulate and would corrupt the next read.
-            portHandler.ser.reset_input_buffer()
-
             key = poll_key()
             if key is not None:
                 if key == 'q':
@@ -183,7 +178,9 @@ def main(args: Args) -> None:
                 in_contact = False
 
             commanded = freeze_pos if in_contact else target
-            packetHandler.WritePosExTxOnly(args.servo_id, commanded, args.speed, args.acc)
+            packetHandler.SyncWritePosEx(args.servo_id, commanded, args.speed, args.acc)
+            packetHandler.groupSyncWrite.txPacket()
+            packetHandler.groupSyncWrite.clearParam()
 
             tag = "[CONTACT]" if in_contact else "         "
             sys.stdout.write("\rtarget=%4d  cmd=%4d  load=%4d  step=%4d  %s " % (target, commanded, load_mag, step, tag))
