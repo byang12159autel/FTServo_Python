@@ -31,8 +31,10 @@ $ pixi install            # creates the .pixi environment
 # Quick Tests: 
 # Basic Ping Test
 $ pixi run python3 sms_sts/ping.py
+
 # Calibrate Max/Min range travel
 $ pixi run python3 sms_sts/calibrate_range.py --servo-id 2 --baudrate 115200
+
 # Keyboard Position Control
 $ pixi run python3 sms_sts/keyboard_stream.py --servo-id 2 --baudrate 115200
 ```
@@ -41,13 +43,20 @@ $ pixi run python3 sms_sts/keyboard_stream.py --servo-id 2 --baudrate 115200
 
 Increase Baudrate 115200 -> 1000000. The WritePosEx packet is 14 bytes. 1 Mbps drops every byte's wire time ~9×. 
 ```bash
+# Sets baudrate to 1000000
 pixi run python3 sms_sts/set_baud.py
 
+# Rerun Calibration
+pixi run python3 sms_sts/calibrate_range.py --servo-id 2 --baudrate 1000000
+
+# Deadtime 20ms
 pixi run python3 sms_sts/keyboard_stream.py --servo-id 2 --baudrate 1000000 --rate-hz 200 --acc 200 
 ```
 
 Internally the position control runs a trapezoidal velocity profile for each new goal. Tune default --acc 50 and --speed 60 for the trapezoid. 
 
+#### Notes:
+- Watch calibration range. Current no fix for 0 wrap-around (0 -> 4096) except for hardware remount
 
 
 ## SMS/STS Control Modes
