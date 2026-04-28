@@ -1,5 +1,7 @@
 This is source code from [official feetech repository](https://github.com/ftservo/FTServo_Python).
 
+TODO: Central script to write ID and baudrate to EPROM
+
 ## Structure
 
 ```
@@ -29,8 +31,8 @@ $ cd FTServo_Python
 $ pixi install            # creates the .pixi environment
 
 # Quick Tests: 
-# Basic Ping Test
-$ pixi run python3 sms_sts/ping.py
+# Basic Ping Test, use sweep flag to search for ID & Baudrate
+$ pixi run python3 sms_sts/ping.py --sweep
 
 # Calibrate Max/Min range travel
 $ pixi run python3 sms_sts/calibrate_range.py --servo-id 2 --baudrate 115200
@@ -58,6 +60,21 @@ Internally the position control runs a trapezoidal velocity profile for each new
 #### Notes:
 - Watch calibration range. Current no fix for 0 wrap-around (0 -> 4096) except for hardware remount
 
+## Hardware List
+- Open Arm Components
+- Fleetech Servo
+
+- M4 x 12mm | x4
+- M4 Nut | x4
+- M2.5 x 16mm | x2
+- M2.5 x 6mm | x3
+- M4x4x6 Brass Insert | x2
+- M3 x 6mm | x4 
+- M3 x 20mm | x4
+- M3 Nut | x4
+- PCB Stand
+- M2.5 x 6mm countersunk| x2
+- M3 x6 self tapping countersunk| x2
 
 ## SMS/STS Control Modes
 
