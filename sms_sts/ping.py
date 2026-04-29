@@ -12,9 +12,10 @@
 #
 
 import argparse
+import os
 import sys
 
-sys.path.append("..")
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from scservo_sdk import *                      # Uses FTServo SDK library
 
 
