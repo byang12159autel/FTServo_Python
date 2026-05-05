@@ -1,4 +1,4 @@
-[project]
+[workspace]
 name = "ftservo-python"
 version = "0.1.0"
 description = "Feetech SMS/STS/SCSCL/HLS servo SDK and examples"

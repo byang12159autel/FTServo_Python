@@ -2,10 +2,10 @@
 #
 # *********     Ping / Sweep Example      *********
 #
-# Default: ping ID 2 at 115200.
+# Default: ping ID 1 at 115200.
 # With --sweep: scan a range of IDs across common baudrates to find the servo.
 #
-#   python3 ping.py                       # ping ID 2 @ 115200
+#   python3 ping.py                       # ping ID 1 @ 115200
 #   python3 ping.py --id 5 --baud 500000  # ping a specific ID/baud
 #   python3 ping.py --sweep               # scan IDs 0..253 across common bauds
 #   python3 ping.py --sweep --id-max 20   # scan IDs 0..20 only (faster)
@@ -91,8 +91,9 @@ def single_ping(port, scs_id, baud):
 
 def main():
     p = argparse.ArgumentParser(description="Ping or sweep FTServo bus")
-    p.add_argument("--port", default="/dev/ttyUSB0")
-    p.add_argument("--id", type=int, default=2, help="servo ID for single ping")
+    p.add_argument("--port", default="/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
+                   help="serial port (defaults to the stable by-id symlink for the CH340 adapter)")
+    p.add_argument("--id", type=int, default=1, help="servo ID for single ping")
     p.add_argument("--baud", type=int, default=115200, help="baudrate for single ping")
     p.add_argument("--sweep", action="store_true",
                    help="scan IDs across common baudrates")

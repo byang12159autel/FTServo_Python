@@ -15,7 +15,7 @@
 # Requires: pip install tyro
 #
 # Usage:
-#   python3 set_baud.py --servo-id 2 --current-baud 115200 --new-code 0
+#   python3 set_baud.py --servo-id 1 --baudrate 115200 --new-code 0
 #
 
 import os
@@ -43,14 +43,14 @@ BAUD_CODE_TO_RATE = {
 
 @dataclass
 class Args:
-    servo_id: int = 2
+    servo_id: int = 1
     """Servo ID on the bus."""
-    current_baud: int = 115200
+    baudrate: int = 115200
     """Current baudrate the servo is operating at."""
     new_code: int = 0
     """New baud code: 0=1M, 1=500k, 2=250k, 3=128k, 4=115200, 5=76800, 6=57600, 7=38400."""
-    port: str = "/dev/ttyUSB0"
-    """Serial port path."""
+    port: str = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+    """Serial port path. Defaults to the stable by-id symlink for the CH340 adapter."""
 
 
 def main(args: Args) -> None:
@@ -65,17 +65,17 @@ def main(args: Args) -> None:
     if not portHandler.openPort():
         print("Failed to open port.")
         return
-    if not portHandler.setBaudRate(args.current_baud):
-        print("Failed to set baud %d." % args.current_baud)
+    if not portHandler.setBaudRate(args.baudrate):
+        print("Failed to set baud %d." % args.baudrate)
         portHandler.closePort()
         return
 
     pos, comm, err = packetHandler.ReadPos(args.servo_id)
     if comm != COMM_SUCCESS or err != 0:
-        print("No response at %d. Wrong baud or wrong ID?" % args.current_baud)
+        print("No response at %d. Wrong baud or wrong ID?" % args.baudrate)
         portHandler.closePort()
         return
-    print("Servo responded at %d. Present pos = %d." % (args.current_baud, pos))
+    print("Servo responded at %d. Present pos = %d." % (args.baudrate, pos))
 
     packetHandler.write1ByteTxRx(args.servo_id, SMS_STS_LOCK, 0)
     # TxOnly: the servo switches baud before its status packet would arrive,
