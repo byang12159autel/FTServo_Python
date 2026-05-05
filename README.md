@@ -53,12 +53,18 @@ pixi run python3 sms_sts/calibrate_range.py --servo-id 2 --baudrate 1000000
 
 # Deadtime 20ms
 pixi run python3 sms_sts/keyboard_stream.py --servo-id 2 --baudrate 1000000 --rate-hz 200 --acc 200 
+
+# soft squeeze (cap at 90% stall torque)                                                       
+pixi run python3 sms_sts/keyboard_stream.py --baudrate 1000000 --max-torque 900 
 ```
 
 Internally the position control runs a trapezoidal velocity profile for each new goal. Tune default --acc 50 and --speed 60 for the trapezoid. 
 
 #### Notes:
 - Watch calibration range. Current no fix for 0 wrap-around (0 -> 4096) except for hardware remount
+- MAX_TORQUE_LIMIT is normalized. The register holds a 0..1000 value that represents percent × 10 of that motor's stall torque, not an absolute number. Max torque = 100 for 80kg.cm servo is 8kg.cm
+
+
 
 ## Hardware List
 - Open Arm Components
@@ -111,6 +117,57 @@ Direct PWM/open-loop drive. The "speed" field is interpreted as a signed PWM dut
 - Drive with `WriteSpec(id, pwm, acc)`.
 
 To return to position mode from any other mode, write `0` to register 33.
+
+## MAX_TORQUE_LIMIT — Position-Mode Force Cap
+
+`MAX_TORQUE_LIMIT` (register 16-17, 2 bytes, range 0..1000) caps the duty cycle the position controller is allowed to output. It is a **clamp**, not a fault trigger — the control loop keeps running, the H-bridge just sees a smaller duty.
+
+Inside the firmware's main loop (running at ~1-2 kHz):
+
+```
+       ┌─────────────────┐    desired_duty
+goal──▶│ Position PID    │────────┐
+pos ──▶│ (Kp, Kd, Ki)    │        │
+       └─────────────────┘        ▼
+                            ┌──────────────────┐
+                            │ clamp to ±cap    │ ← MAX_TORQUE_LIMIT
+                            │ (saturating)     │
+                            └────────┬─────────┘
+                                     │ final_duty
+                                     ▼
+                              ┌────────────┐
+                              │  H-bridge  │
+                              └────────────┘
+```
+
+The PID computes `desired_duty` from position error every cycle. The firmware then clamps it to `[−MAX_TORQUE_LIMIT, +MAX_TORQUE_LIMIT]` before driving the H-bridge. If the PID wants 800 PWM but the cap is 200, only 200 reaches the motor.
+
+### Use case: force-regulated grip
+
+For soft grippers and other compliant mechanisms, the cleanest pattern is:
+
+1. Write a low cap (e.g. 200 = 20% of stall torque) to `MAX_TORQUE_LIMIT`
+2. Stay in position mode (mode 0) — no mode switching needed
+3. Command `WritePosEx` to a position past the object (or past `close_tick`)
+4. The PID drives toward the goal, hits the cap, and applies constant capped torque indefinitely
+
+This gives you the same constant-force behavior as PWM mode (mode 3) but stays inside the firmware's safety envelope. The angle-limit gate, overload protection, and current protection all work normally — none of which is reliably true in mode 3.
+
+### Scale is normalized per motor
+
+The 0..1000 register value is **percent × 10 of *that* motor's stall torque**, not an absolute torque value. The firmware doesn't know the motor's rated kg·cm. So:
+
+| Cap | % stall | 80 kg·cm motor | 40 kg·cm motor | 20 kg·cm motor |
+|---|---|---|---|---|
+| 1000 | 100% | 80 kg·cm | 40 kg·cm | 20 kg·cm |
+| 200 | 20% | 16 kg·cm | 8 kg·cm | 4 kg·cm |
+| 100 | 10% | 8 kg·cm | 4 kg·cm | 2 kg·cm |
+
+Across a fleet of mixed servos: same `MAX_TORQUE_LIMIT` value gives the same *fraction* of capacity, not the same absolute force.
+
+### Register lives in EEPROM
+
+Writes require the unlock-write-lock dance (`unLockEprom` → `write2ByteTxRx(id, 16, value)` → `LockEprom`). The value persists across power cycles. `keyboard_stream.py` exposes this as `--max-torque <0..1000>` and handles the EEPROM ritual for you.
 
 ## Debug Notes
 
