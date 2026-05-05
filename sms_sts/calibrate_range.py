@@ -7,10 +7,15 @@
 # and fully-CLOSED positions, then writes those ticks as min/max angle
 # limits to the servo's EPROM so the firmware refuses to drive past them.
 #
+# Pass both --min-tick and --max-tick to skip the hand-jog capture and write
+# the supplied values directly (useful when you already know the limits, e.g.
+# from a previous read_spec.py readout).
+#
 # Requires: pip install tyro
 #
 # Usage:
 #   python3 calibrate_range.py --servo-id 2 --baudrate 115200
+#   python3 calibrate_range.py --servo-id 1 --min-tick 1500 --max-tick 2700
 #
 
 import os
@@ -29,14 +34,18 @@ from scservo_sdk import *                      # Uses FTServo SDK library
 
 @dataclass
 class Args:
-    servo_id: int = 2
+    servo_id: int = 1
     """Servo ID on the bus."""
     baudrate: int = 115200
     """Serial baud rate."""
-    port: str = "/dev/ttyUSB0"
-    """Serial port path. Windows: 'COM1', Linux: '/dev/ttyUSB0', Mac: '/dev/tty.usbserial-*'."""
+    port: str = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+    """Serial port path. Defaults to the stable by-id symlink for the CH340 adapter."""
     min_range: int = 50
     """Reject calibration if |CLOSED_TICK - OPEN_TICK| is below this many ticks."""
+    min_tick: int | None = None
+    """Manual MIN_ANGLE_LIMIT (ticks). If both --min-tick and --max-tick are set, the hand-jog capture is skipped."""
+    max_tick: int | None = None
+    """Manual MAX_ANGLE_LIMIT (ticks). If both --min-tick and --max-tick are set, the hand-jog capture is skipped."""
 
 
 def check(comm_result, error, packetHandler, where):
@@ -77,6 +86,13 @@ def capture(packetHandler, scs_id, label):
 
 
 def main(args: Args) -> None:
+    if (args.min_tick is None) != (args.max_tick is None):
+        print("--min-tick and --max-tick must be supplied together (or neither).")
+        return
+    if args.min_tick is not None and args.min_tick >= args.max_tick:
+        print("--min-tick (%d) must be < --max-tick (%d)." % (args.min_tick, args.max_tick))
+        return
+
     portHandler = PortHandler(args.port)
     packetHandler = sms_sts(portHandler)
 
@@ -108,14 +124,18 @@ def main(args: Args) -> None:
         portHandler.closePort()
         return
 
-    open_tick = capture(packetHandler, args.servo_id, "OPEN")
-    if open_tick is None:
-        portHandler.closePort()
-        return
-    closed_tick = capture(packetHandler, args.servo_id, "CLOSED")
-    if closed_tick is None:
-        portHandler.closePort()
-        return
+    if args.min_tick is not None:
+        open_tick, closed_tick = args.min_tick, args.max_tick
+        print("Manual mode: skipping hand-jog capture.")
+    else:
+        open_tick = capture(packetHandler, args.servo_id, "OPEN")
+        if open_tick is None:
+            portHandler.closePort()
+            return
+        closed_tick = capture(packetHandler, args.servo_id, "CLOSED")
+        if closed_tick is None:
+            portHandler.closePort()
+            return
 
     if abs(closed_tick - open_tick) < args.min_range:
         print("Range too narrow (%d < %d ticks). Aborting." % (abs(closed_tick - open_tick), args.min_range))
