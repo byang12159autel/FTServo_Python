@@ -27,8 +27,12 @@ SMS_STS_MIN_ANGLE_LIMIT_L = 9
 SMS_STS_MIN_ANGLE_LIMIT_H = 10
 SMS_STS_MAX_ANGLE_LIMIT_L = 11
 SMS_STS_MAX_ANGLE_LIMIT_H = 12
+SMS_STS_MAX_TORQUE_LIMIT_L = 16   # power-on torque ceiling (0..1000); Torque_Limit resets to this
+SMS_STS_MAX_TORQUE_LIMIT_H = 17
 SMS_STS_CW_DEAD = 26
 SMS_STS_CCW_DEAD = 27
+SMS_STS_PROTECTION_CURRENT_L = 28  # overcurrent trip threshold (firmware shuts motor down above this)
+SMS_STS_PROTECTION_CURRENT_H = 29
 SMS_STS_OFS_L = 31
 SMS_STS_OFS_H = 32
 SMS_STS_MODE = 33
@@ -42,6 +46,8 @@ SMS_STS_GOAL_TIME_L = 44
 SMS_STS_GOAL_TIME_H = 45
 SMS_STS_GOAL_SPEED_L = 46
 SMS_STS_GOAL_SPEED_H = 47
+SMS_STS_TORQUE_LIMIT_L = 48   # live torque cap (0..1000); writable in RAM, no EEPROM unlock
+SMS_STS_TORQUE_LIMIT_H = 49
 SMS_STS_LOCK = 55
 
 #-------SRAM(只读)--------
@@ -89,6 +95,25 @@ class sms_sts(protocol_packet_handler):
     def ReadMoving(self, scs_id):
         moving, scs_comm_result, scs_error = self.read1ByteTxRx(scs_id, SMS_STS_MOVING)
         return moving, scs_comm_result, scs_error
+
+    def ReadLoad(self, scs_id):
+        # PRESENT_LOAD: bit 10 = direction sign, bits 0..9 = magnitude (0..1023).
+        load, scs_comm_result, scs_error = self.read2ByteTxRx(scs_id, SMS_STS_PRESENT_LOAD_L)
+        return self.scs_tohost(load, 10), scs_comm_result, scs_error
+
+    def ReadCurrent(self, scs_id):
+        current, scs_comm_result, scs_error = self.read2ByteTxRx(scs_id, SMS_STS_PRESENT_CURRENT_L)
+        return self.scs_tohost(current, 15), scs_comm_result, scs_error
+
+    def WriteTorqueLimit(self, scs_id, limit):
+        # Live torque cap (0..1000), SRAM — no EEPROM unlock needed. In position
+        # mode the servo holds at this torque ceiling instead of forcing to goal,
+        # giving a constant-force grip when GOAL_POSITION is set past the object.
+        return self.write2ByteTxRx(scs_id, SMS_STS_TORQUE_LIMIT_L, limit)
+
+    def ReadTorqueLimit(self, scs_id):
+        limit, scs_comm_result, scs_error = self.read2ByteTxRx(scs_id, SMS_STS_TORQUE_LIMIT_L)
+        return limit, scs_comm_result, scs_error
 
     def SyncWritePosEx(self, scs_id, position, speed, acc):
         position = self.scs_toscs(position, 15)
