@@ -1,6 +1,7 @@
 This is source code from [official feetech repository](https://github.com/ftservo/FTServo_Python).
 
-TODO: Central script to write ID and baudrate to EPROM
+EEPROM setup is split into one-shot scripts: `sms_sts/set_id.py` (bus ID),
+`sms_sts/set_baud.py` (baudrate), `sms_sts/calibrate_range.py` (angle limits).
 
 ## Structure
 
@@ -48,13 +49,19 @@ Increase Baudrate 115200 -> 1000000. The WritePosEx packet is 14 bytes. 1 Mbps d
 # Sets baudrate to 1000000
 pixi run python3 sms_sts/set_baud.py
 
+# Change Servo ID
+pixi run python3 sms_sts/set_id.py --old-id 1 --new-id 21 --baudrate 1000000
+
 # Rerun Calibration
-pixi run python3 sms_sts/calibrate_range.py --servo-id 2 --baudrate 1000000
+pixi run python3 sms_sts/calibrate_range.py --servo-id 21 --baudrate 1000000
 
 # Deadtime 20ms
-pixi run python3 sms_sts/keyboard_stream.py --servo-id 2 --baudrate 1000000 --rate-hz 200 --acc 200 
+pixi run python3 sms_sts/keyboard_stream.py --servo-id 21 --baudrate 1000000 --rate-hz 200 --acc 200 
 
-# soft squeeze (cap at 90% stall torque)                                                       
+# constant-force grip (position mode + live torque cap, no PWM-mode switching)
+pixi run python3 sms_sts/force_grip_torque.py --servo-id 21 --baudrate 1000000 --grip-force 300
+
+# archive: soft squeeze (cap at 90% stall torque)                                                       
 pixi run python3 sms_sts/keyboard_stream.py --baudrate 1000000 --max-torque 900 
 ```
 
@@ -67,20 +74,7 @@ Internally the position control runs a trapezoidal velocity profile for each new
 
 
 ## Hardware List
-- Open Arm Components
-- Fleetech Servo
 
-- M4 x 12mm | x4
-- M4 Nut | x4
-- M2.5 x 16mm | x2
-- M2.5 x 6mm | x3
-- M4x4x6 Brass Insert | x2
-- M3 x 6mm | x4 
-- M3 x 20mm | x4
-- M3 Nut | x4
-- PCB Stand
-- M2.5 x 6mm countersunk| x2
-- M3 x6 self tapping countersunk| x2
 
 ## SMS/STS Control Modes
 
@@ -165,9 +159,41 @@ The 0..1000 register value is **percent × 10 of *that* motor's stall torque**, 
 
 Across a fleet of mixed servos: same `MAX_TORQUE_LIMIT` value gives the same *fraction* of capacity, not the same absolute force.
 
-### Register lives in EEPROM
+### Two registers: MAX_TORQUE_LIMIT (16, EEPROM) vs TORQUE_LIMIT (48, SRAM)
 
-Writes require the unlock-write-lock dance (`unLockEprom` → `write2ByteTxRx(id, 16, value)` → `LockEprom`). The value persists across power cycles. `keyboard_stream.py` exposes this as `--max-torque <0..1000>` and handles the EEPROM ritual for you.
+The clamp value lives in two places, and which one you write decides whether you pay the EEPROM cost:
+
+| Register | Addr | Memory | Write cost | Persists? | Role |
+|---|---|---|---|---|---|
+| `MAX_TORQUE_LIMIT` | 16-17 | EEPROM | unlock → write → lock | yes | power-on ceiling; `TORQUE_LIMIT` resets to this on boot |
+| `TORQUE_LIMIT` | 48-49 | SRAM | plain `write2ByteTxRx` | no | the **live** clamp the PID actually uses |
+
+- **`MAX_TORQUE_LIMIT` (16)** is the persistent ceiling. Writing it requires the unlock-write-lock dance (`unLockEprom` → `write2ByteTxRx(id, 16, value)` → `LockEprom`) and survives power cycles. `keyboard_stream.py` exposes this as `--max-torque <0..1000>` and handles the EEPROM ritual for you. Use it to set a fleet-wide safe ceiling once.
+- **`TORQUE_LIMIT` (48)** is the runtime value the firmware clamps against every cycle. It's plain SRAM — `WriteTorqueLimit(id, value)` (or `write2ByteTxRx(id, 48, value)`) lands immediately, **no unlock needed**, and you can rewrite it every control tick. On boot it resets to `MAX_TORQUE_LIMIT`. Use it to vary grip force live.
+
+For an interactive grip loop you want register 48: change the cap as fast as `GOAL_POSITION` without EEPROM wear. This is what `sms_sts/force_grip_torque.py` does — it stays in position mode and writes `TORQUE_LIMIT` to set grip force, so the gripper stalls at the commanded force when it closes past the object. SDK helpers: `WriteTorqueLimit` / `ReadTorqueLimit`, plus `ReadLoad` / `ReadCurrent` for monitoring.
+
+Verified on an STS3215 (model 10504): `TORQUE_LIMIT` is live-writable in RAM and mode 0 honors it — at cap 120 the gripper stalled before its goal drawing |current| ≈ 6; at cap 990 it reached the goal drawing |current| ≈ 487.
+
+### Two gripper scripts: PWM hold vs torque cap
+
+There are two force-grip scripts. They produce the same constant-force result by different means.
+
+| | `force_grip.py` | `force_grip_torque.py` |
+|---|---|---|
+| Hold mechanism | switches to **PWM mode (3)**, drives fixed duty (`--hold-pwm`) | stays in **position mode (0)**, caps `TORQUE_LIMIT` (reg 48) |
+| Force type | open-loop duty — a force *source* | torque *ceiling* inside the position PID |
+| Mode switching | yes — EEPROM unlock/lock dance every grip & release | none — one mode, ever |
+| Grip trigger | 4-state FSM: contact-load **or** stall detection w/ debounce | command close; servo simply stalls at the cap |
+| Angle limits during hold | ignored by firmware → enforced host-side | native — position mode honors them |
+| Overload / `PROTECTION_CURRENT` | unreliable in PWM mode | active (firmware safety net) |
+| Live force change | no | yes — `+`/`-` rewrites reg 48 mid-grip |
+
+**Use `force_grip_torque.py` for clamping rigid-ish objects** (the common case). The torque cap lives *inside* the position loop, so you can't push harder than the cap — no contact detection needed, no host-side limit policing, no EEPROM write per cycle, and the firmware's overload/current protection stays armed.
+
+**Use `force_grip.py` for soft, compliant holds** where you want a position-independent constant push (e.g. keep squeezing foam regardless of travel). PWM mode is a pure force source; the torque cap only pushes while there's position error toward the goal — identical for clamping, but different for "squeeze forever."
+
+Note the force scales differ: `--hold-pwm` (PWM duty, mode 3) and `--grip-force` (% stall torque, reg 48) are both 0..1000 but mean different things — don't carry a tuned value straight across.
 
 ## Debug Notes
 
